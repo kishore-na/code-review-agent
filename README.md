@@ -1,130 +1,171 @@
 # Code Review Agent
 
-A lightweight command-line code review assistant built with `langgraph` and Anthropic Claude. The agent accepts either a file path or an inline code snippet, reviews the code for quality and performance issues, and returns structured findings.
+A command-line AI agent that reviews source code for **quality and performance issues**, built with [LangGraph](https://github.com/langchain-ai/langgraph) and [Anthropic Claude](https://www.anthropic.com).
 
-## Features
+---
 
-- Review code from a local file path or inline text.
-- Supports many common languages (`.py`, `.js`, `.ts`, `.go`, `.rs`, `.java`, `.cpp`, `.c`, `.html`, `.css`, `.sql`, `.sh`, etc.).
-- Uses a directed state graph to route input, parse code, call Anthropic Claude, and format output.
-- Returns findings in a human-readable code review summary.
+## What it does
 
-## Repository Structure
+- Accepts a **file path** or **inline code snippet** as input
+- Routes the input through a LangGraph state graph
+- Sends code to Claude with a structured review prompt
+- Returns **inline comments per issue**, grouped by line number with severity levels
 
-- `main.py` - CLI entry point for interacting with the agent.
-- `requirements.txt` - Python dependencies.
-- `agent/graph.py` - Builds the review state graph and manages node flow.
-- `agent/nodes.py` - Implements the router, file reader, inline parser, review request, and output formatter.
-- `agent/tools.py` - File loading and language detection utilities.
-- `agent/prompts.py` - System prompt and review prompt builder for the LLM.
-- `agent/state.py` - Typed state definition for the graph.
+Example output:
 
-## Requirements
+```
+Code review — `users.py`
+────────────────────────────────────────
+Line    1  ℹ️  INFO     [QUALITY]      Function lacks a docstring.
+Line    3  ⚠️  WARN     [QUALITY]      Variable 'id' shadows the built-in function — rename to 'user_id'.
+Line    4  ❌ ERROR    [QUALITY]      SQL query uses string interpolation — use parameterized queries instead.
+Line    4  ❌ ERROR    [PERFORMANCE]  Query executed inside a loop — batch IDs into a single IN clause.
+────────────────────────────────────────
+4 issue(s) found.
+```
 
-- Python 3.11 or later
-- `pip` package manager
-- An Anthropic API key
+---
 
-## Installation
+## How it works
 
-1. Clone the repository:
+The agent is a directed **LangGraph state graph** with 5 nodes:
+
+```
+user input
+    │
+    ▼
+ router  ──── file path ────▶  read_file
+    │                               │
+    └──── inline code ──▶ use_inline
+                                    │
+                          ┌─────────┘
+                          ▼
+                     review_code   ◀── Claude (Anthropic API)
+                          │
+                          ▼
+                    format_output
+                          │
+                          ▼
+                         END
+```
+
+| Node | Role |
+|---|---|
+| `router` | Conditional node — detects file path vs inline code |
+| `read_file` | Reads file from disk, detects language from extension |
+| `use_inline` | Extracts code from fenced block or raw paste |
+| `review_code` | Calls Claude, returns structured JSON findings |
+| `format_output` | Formats findings into inline comments sorted by line |
+
+---
+
+## Stack
+
+| | |
+|---|---|
+| Language | Python 3.12 |
+| Agent framework | LangGraph |
+| LLM | Anthropic Claude (claude-opus-4-5) |
+| Config | python-dotenv |
+
+---
+
+## Setup
+
+**1. Clone the repo**
 
 ```bash
-git clone https://github.com/<your-org>/code-review-agent.git
+git clone https://github.com/kishore-na/code-review-agent.git
 cd code-review-agent
 ```
 
-2. Create a Python virtual environment:
+**2. Create and activate a virtual environment**
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 ```
 
-3. Install dependencies:
+**3. Install dependencies**
 
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Set your Anthropic API key in the environment.
-
-For macOS/Linux:
+**4. Add your Anthropic API key**
 
 ```bash
-export ANTHROPIC_API_KEY="your_api_key"
+cp .env.example .env
+# edit .env and add your key
 ```
 
-For Windows (PowerShell):
+`.env` format:
 
-```powershell
-$env:ANTHROPIC_API_KEY = "your_api_key"
+```
+ANTHROPIC_API_KEY=sk-ant-your-key-here
 ```
 
-Optionally, create a `.env` file with the same variable and the app will load it automatically.
+---
 
 ## Usage
-
-Run the CLI:
 
 ```bash
 python main.py
 ```
 
-Then enter one of:
+**Review a file:**
 
-- A file path to review a source file.
-- A code snippet directly.
-- A fenced code block like:
-
-```markdown
-```python
-print("Hello")
 ```
+>>> ~/projects/myapp/utils.py
 ```
 
-Type `exit` to quit.
+**Review inline code** (type `--code`, paste, then `Ctrl+D`):
 
-Example session:
-
-```text
-Code Review Agent
-────────────────────────
-Paste a file path or code snippet.
-Type 'exit' to quit.
-
->>> ./example.py
-
-Code review — `example.py`
-────────────────────────
-Line    8  ⚠️  WARN  [QUALITY]  Function is missing a docstring.
-────────────────────────
-1 issue(s) found.
+```
+>>> --code
+(Paste code, then press Enter + Ctrl+D when done)
+def get_users(ids):
+    result = []
+    for id in ids:
+        ...
+^D
 ```
 
-## How it Works
+**Exit:**
 
-1. `main.py` loads the graph and reads user input.
-2. `agent/graph.py` builds a `StateGraph` with nodes for routing, file reading, inline parsing, review, and formatting.
-3. `agent/nodes.py` decides if the input is a file path or inline code.
-4. If a file path is provided, `agent/tools.py` reads the file and detects its language.
-5. The agent sends the code to Anthropic Claude with a structured prompt.
-6. The response is parsed and formatted into line-based review findings.
+```
+>>> exit
+```
 
-## Supported Languages
+---
 
-The agent currently recognizes these file extensions:
+## Supported languages
 
-- `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.cs`, `.java`, `.go`, `.rs`, `.cpp`, `.c`, `.html`, `.css`, `.sql`, `.sh`
+`.py` `.ts` `.tsx` `.js` `.jsx` `.cs` `.java` `.go` `.rs` `.cpp` `.c` `.html` `.css` `.sql` `.sh`
 
-If no extension is recognized, the code is treated as `plaintext`.
+---
 
-## Notes
+## Project structure
 
-- This project requires an Anthropic Claude model and an active API key.
-- The system prompt instructs the model to return only JSON output.
-- If the model returns fenced JSON or extra text, the code attempts to clean and parse it.
+```
+code-review-agent/
+├── .env                  # API key (not committed)
+├── .env.example          # Template
+├── requirements.txt
+├── main.py               # CLI entrypoint
+└── agent/
+    ├── state.py          # ReviewState TypedDict
+    ├── prompts.py        # System prompt + review prompt builder
+    ├── tools.py          # read_file utility + language detection
+    ├── nodes.py          # All 5 node functions
+    └── graph.py          # LangGraph graph assembly
+```
 
-## License
+---
 
-This repository does not include a license file. Add a license if you plan to publish or share it publicly.
+## Roadmap
+
+- [ ] Multi-file / directory support using LangGraph `Send` (map-reduce pattern)
+- [ ] Agentic doc lookup — agent autonomously fetches fix patterns per finding
+- [ ] Severity filter (`--errors-only` flag)
+- [ ] Markdown report export
